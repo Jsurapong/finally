@@ -454,3 +454,67 @@ The container is designed to deploy to AWS App Runner, Render, or any container 
 - Portfolio visualization: heatmap renders with correct colors, P&L chart has data points
 - AI chat (mocked): send a message, receive a response, trade execution appears inline
 - SSE resilience: disconnect and verify reconnection
+
+---
+
+## 13. Review Notes
+
+> Added 2026-04-22. Questions, clarifications, and simplification opportunities for the implementation team.
+
+### Questions & Clarifications
+
+**Section 2 / Section 10 — Daily Change %**
+The watchlist shows "daily change %" but the simulator has no concept of a market open price. Is this intended to mean change since the process started, change since page load, or a simulated daily open baked into the seed prices? Needs a clear definition before the frontend calculates it.
+
+**Section 6 — SSE cadence vs. Massive polling cadence**
+The simulator pushes updates every ~500ms, but the Massive free tier only polls every 15 seconds. The plan says both implement the same interface, but the flash-animation UX relies on frequent updates. Clarify: does the SSE stream still emit every 500ms (repeating stale prices) to keep the connection alive, or only on new data? If the latter, animations will rarely fire with a real API key.
+
+**Section 7 — Lazy initialization race condition**
+"On startup (or first request)" — which is it? If two requests arrive simultaneously before the DB file exists, both could attempt to create the schema. Should initialization happen at startup (in a FastAPI `lifespan` handler), not on first request.
+
+**Section 8 — Missing price history endpoint**
+The main chart area requires historical price data for the selected ticker, but no `/api/prices/{ticker}/history` (or equivalent) endpoint is listed. The sparkline uses SSE-accumulated data, but the full chart presumably needs more than what's been collected since page load. Either add an endpoint, or explicitly state that the main chart also uses SSE-accumulated data only (and is therefore sparse on first load).
+
+**Section 8 — Response shapes not specified**
+`GET /api/portfolio` and `GET /api/watchlist` response shapes are described in prose but not as schemas. Frontend and backend agents may interpret these differently. A minimal JSON example for each endpoint would prevent misalignment.
+
+**Section 9 — Trade failure feedback loop**
+Step 6 says "auto-execute trades"; step 7 says store the message; step 8 says return to frontend. If a trade fails validation, the plan says "the error is included in the chat response" — but there's no step where the LLM is informed of the failure so it can revise its response. The current flow means the LLM's `message` field may say "I bought 100 shares of AAPL" even if the buy was rejected. Clarify whether the backend should re-prompt the LLM with failure details, or just annotate the response before returning it.
+
+**Section 9 — Conversation history limit**
+"Loads recent conversation history" — how many messages? Without a limit, long sessions will eventually overflow the LLM context window. Recommend specifying a cap (e.g., last 20 messages).
+
+**Section 9 — LLM_MOCK response format not specified**
+The mock mode is mentioned but the shape of the deterministic mock response is not defined. Different agents implementing the backend and tests could produce incompatible mocks. Add a canonical example mock response to this section.
+
+**Section 10 — Empty states**
+No spec for what the UI shows when the user has zero positions (heatmap, positions table, P&L chart). These states will exist on first launch — define a placeholder or skeleton state.
+
+**Section 11 — .dockerignore**
+The Dockerfile section does not mention a `.dockerignore` file. Without one, `npm install && npm run build` will copy `node_modules`, `.git`, and other large directories into the build context, making builds slow. Worth calling out explicitly.
+
+---
+
+### Feedback
+
+**Sections 2 and 10 significantly overlap.** The "What the User Can Do" list in §2 and the "Layout" list in §10 describe the same UI elements in slightly different words. Consider collapsing one into the other, or making §2 the UX/behavior spec and §10 strictly the technical/component spec.
+
+**The `actions` column in `chat_messages` duplicates trade data.** Trades and watchlist changes are already persisted in the `trades` and `watchlist` tables. Storing them again as a JSON blob in `chat_messages.actions` creates a second source of truth. If it's kept, clarify whether it's a denormalized audit log (append-only, never queried for calculations) or authoritative — and document what happens if it diverges from the `trades` table.
+
+**`GET /api/portfolio/history` time range is unspecified.** The P&L chart needs a time range parameter (last hour, today, all time) or the endpoint will return every snapshot ever recorded, which grows unbounded. Consider defaulting to the last 24 hours and allowing a query param.
+
+**Flash animation relies on previous price comparison.** The plan says the SSE event includes `previous price` — confirm the backend always populates this field even on the very first event for a ticker. If the first event has `previous_price: null`, the frontend needs to handle that gracefully without flashing.
+
+---
+
+### Simplification Opportunities
+
+1. **Remove UUID `id` from `watchlist` and `positions` tables.** The UNIQUE constraint on `(user_id, ticker)` already provides a natural key. Using `ticker` as the primary key (for the single-user case) eliminates a column and simplifies queries. If multi-user is ever needed, `(user_id, ticker)` becomes the composite PK.
+
+2. **Remove `users_profile.created_at`.** In a single-user, no-auth app this field is never displayed and never queried. Removing it reduces noise in the schema.
+
+3. **Collapse the two start scripts into one.** `start_mac.sh` and `start_windows.ps1` are nearly identical except for shell syntax. A single `docker run` one-liner in the README may be sufficient, with the scripts as a convenience wrapper rather than a necessity.
+
+4. **The `docker-compose.yml` described as "optional convenience wrapper" adds confusion.** If it's not required for the primary flow, remove it from the directory structure or explain its exact purpose (e.g., used only for local dev with hot reload). Having both `docker run` scripts and a `docker-compose.yml` that does the same thing will cause students to wonder which to use.
+
+5. **The `watchlist_changes` action only supports `add` — what about `remove`?** The structured output schema comment says "watchlist modifications" but the example only shows `"action": "add"`. Explicitly enumerate the valid values (`"add"` | `"remove"`) in the schema definition to avoid ambiguity during implementation.

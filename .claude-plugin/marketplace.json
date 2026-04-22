@@ -1,0 +1,19 @@
+{
+  "name": "jay-tools",
+  "owner": {
+    "name": "jay-tools",
+    "url": "https://github.com/Jsurapong"
+  },
+  "plugins": [
+    {
+      "name": "independent-reviewer",
+      "source": "./independent-reviewer",
+      "description": "Carry out an independent review of the changes since the last commit",
+      "version": "1.0.0",
+      "author": {
+        "name": "Jay Surapong",
+        "url": "https://github.com/Jsurapong"
+      }
+    }
+  ]
+}

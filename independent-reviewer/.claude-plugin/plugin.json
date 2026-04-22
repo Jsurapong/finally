@@ -1,0 +1,5 @@
+{
+  "name": "independent-reviewer",
+  "description": "Carry out an independent review of the changes since the last commit",
+  "version": "1.0.0"
+}
